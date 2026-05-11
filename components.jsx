@@ -359,7 +359,6 @@ function PageHeader({ title, subtitle, actions }) {
 
 /* ============ Product thumb (placeholder swatches) ============ */
 function ProductThumb({ product, size = 40 }) {
-  // category to color
   const cmap = {
     "Top wear": "var(--neon-1)",
     "Bottom wear": "var(--neon-2)",
@@ -369,6 +368,25 @@ function ProductThumb({ product, size = 40 }) {
   };
   const c = cmap[product.category] || "var(--neon-1)";
   const initial = product.sku.split("-")[0];
+  const [imgErr, setImgErr] = React.useState(false);
+
+  if (product.imageUrl && !imgErr) {
+    return (
+      <div className="cell-thumb" style={{
+        width: size, height: size, borderRadius: size > 60 ? 12 : 8,
+        overflow: 'hidden', padding: 0,
+        borderColor: `color-mix(in oklab, ${c} 30%, var(--border))`,
+        background: 'var(--surface-2)',
+      }}>
+        <img
+          src={product.imageUrl}
+          alt={product.name}
+          onError={() => setImgErr(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      </div>
+    );
+  }
   return (
     <div className="cell-thumb" style={{
       width: size, height: size, borderRadius: size > 60 ? 12 : 8,

@@ -12,7 +12,12 @@
       "Bash(curl -s http://localhost:8000)",
       "PowerShell(powershell -ExecutionPolicy Bypass -Command \"& 'C:\\\\Users\\\\bentm\\\\Desktop\\\\Claude\\\\CuteBoy\\\\cuteboy inventory management\\\\serve.ps1'\")",
       "WebSearch",
-      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbyfp5o52iPCBLmAz8mLWzhUmZz-Q5g1VXTwYqH_UqBlEnDuDd7-Uk9bPCMx7YYTgd1hvQ/exec?action=getProducts\")"
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbyfp5o52iPCBLmAz8mLWzhUmZz-Q5g1VXTwYqH_UqBlEnDuDd7-Uk9bPCMx7YYTgd1hvQ/exec?action=getProducts\")",
+      "Bash(curl -sL \"https://benzmetha.github.io/cuteboy-inventory/\")",
+      "Bash(curl -sL \"https://benzmetha.github.io/cuteboy-inventory/styles.css\")",
+      "Bash(curl -sL \"https://benzmetha.github.io/cuteboy-inventory/app.jsx\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Products: {len\\(d\\)} items'\\); [print\\(f' {p[\\\\\"sku\\\\\"]} · stock={p[\\\\\"stock\\\\\"]}'\\) for p in d[:3]]\")",
+      "mcp__18060ecf-7de0-412a-b29b-95ca081d2bff__read_file_content"
     ]
   }
 }

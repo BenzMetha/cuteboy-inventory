@@ -702,9 +702,25 @@ function ProductsPage({ onSelectProduct }) {
                   </td>
                   <td><span className="badge badge-neutral">{p.category}</span></td>
                   <td>{p.color}</td>
-                  <td className="num">{fmtTHB(p.price)}</td>
+                  <td className="num">
+                    {p.comparePrice > p.price
+                      ? <div>
+                          <span style={{ textDecoration: 'line-through', color: 'var(--text-mid)', fontSize: 11, marginRight: 4 }}>{fmtTHB(p.comparePrice)}</span>
+                          <span style={{ color: 'var(--neon-danger)', fontWeight: 600 }}>{fmtTHB(p.price)}</span>
+                          <span className="badge badge-danger" style={{ marginLeft: 6, fontSize: 10 }}>-{Math.round((1 - p.price / p.comparePrice) * 100)}%</span>
+                        </div>
+                      : fmtTHB(p.price)}
+                  </td>
                   <td className="num dim">{fmtTHB(p.cost)}</td>
-                  <td className="num"><b>{fmtNum(p.stock)}</b></td>
+                  <td className="num">
+                    <b>{fmtNum(p.stock)}</b>
+                    {(p.stockRAMA2 > 0 || p.stockMYCL > 0) && (
+                      <div style={{ fontSize: 10, color: 'var(--text-mid)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
+                        {p.stockRAMA2 > 0 && <span>R2:{p.stockRAMA2} </span>}
+                        {p.stockMYCL > 0 && <span>MC:{p.stockMYCL}</span>}
+                      </div>
+                    )}
+                  </td>
                   <td><StockBadge stock={p.stock} reorderPoint={p.reorderPoint}/></td>
                   <td>
                     {p.shopify === 'synced' && <span className="badge badge-green"><span className="dot-mark"/>synced</span>}
@@ -727,16 +743,24 @@ function ProductDetailPage({ productId, onBack }) {
   const [tab, setTab] = useState("overview");
   if (!p) return null;
 
-  // distribute size stock across warehouses for matrix
-  const wRow = WAREHOUSES.map(w => ({
-    wh: w.code,
-    name: w.name,
-    sizes: p.sizes.map(s => {
-      // synthetic split
-      const share = w.code === "BKK" ? 0.6 : w.code === "CNX" ? 0.28 : 0.12;
-      return { size: s.size, qty: Math.round(s.qty * share) };
-    }),
-  }));
+  // per-warehouse stock from real data
+  const whStockMap = {
+    "RAMA2": p.stockRAMA2 || 0,
+    "MYCL":  p.stockMYCL  || 0,
+  };
+  const totalRealStock = Object.values(whStockMap).reduce((a, b) => a + b, 0);
+
+  const wRow = WAREHOUSES.map(w => {
+    const realStock = whStockMap[w.code] || 0;
+    // distribute sizes proportionally to warehouse stock
+    const share = totalRealStock > 0 ? realStock / totalRealStock : 1 / WAREHOUSES.length;
+    return {
+      wh: w.code,
+      name: w.name,
+      total: realStock,
+      sizes: p.sizes.map(s => ({ size: s.size, qty: Math.round(s.qty * share) })),
+    };
+  });
 
   const productMovements = MOVEMENTS.filter(m => m.productId === p.id);
 
@@ -753,15 +777,26 @@ function ProductDetailPage({ productId, onBack }) {
       />
 
       <div className="product-hero">
-        <div className="product-img">
-          <span className="product-img-label">[ Product image ]</span>
+        <div className="product-img" style={{ overflow: 'hidden', position: 'relative' }}>
+          {p.imageUrl
+            ? <img src={p.imageUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }}/>
+            : null}
+          <span className="product-img-label" style={{ display: p.imageUrl ? 'none' : 'flex' }}>[ No image ]</span>
         </div>
         <div className="stack">
           <div className="card" style={{ padding: 18 }}>
             <div className="row" style={{ gap: 18, flexWrap: 'wrap' }}>
               <div>
                 <div className="stat-label">ราคาขาย</div>
-                <div className="stat-value" style={{ fontSize: 24 }}>{fmtTHB(p.price)}</div>
+                {p.comparePrice > p.price
+                  ? <div>
+                      <div style={{ textDecoration: 'line-through', color: 'var(--text-mid)', fontSize: 14 }}>{fmtTHB(p.comparePrice)}</div>
+                      <div className="stat-value" style={{ fontSize: 24, color: 'var(--neon-danger)' }}>
+                        {fmtTHB(p.price)}
+                        <span className="badge badge-danger" style={{ marginLeft: 8, fontSize: 11 }}>-{Math.round((1 - p.price / p.comparePrice) * 100)}%</span>
+                      </div>
+                    </div>
+                  : <div className="stat-value" style={{ fontSize: 24 }}>{fmtTHB(p.price)}</div>}
               </div>
               <div>
                 <div className="stat-label">ต้นทุน</div>
@@ -769,7 +804,7 @@ function ProductDetailPage({ productId, onBack }) {
               </div>
               <div>
                 <div className="stat-label">Gross margin</div>
-                <div className="stat-value text-neon" style={{ fontSize: 24 }}>{Math.round((1 - p.cost / p.price) * 100)}%</div>
+                <div className="stat-value text-neon" style={{ fontSize: 24 }}>{p.price > 0 ? Math.round((1 - p.cost / p.price) * 100) : 0}%</div>
               </div>
               <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
                 <StockBadge stock={p.stock} reorderPoint={p.reorderPoint}/>
@@ -898,26 +933,39 @@ function ProductDetailPage({ productId, onBack }) {
 
       {tab === "locations" && (
         <div className="stack">
-          {WAREHOUSES.map(w => {
-            const share = w.code === "BKK" ? 0.6 : w.code === "CNX" ? 0.28 : 0.12;
-            const qty = Math.round(p.stock * share);
-            return (
-              <div className="card" key={w.id}>
-                <div className="row-between">
-                  <div>
-                    <h3 className="card-title">{w.name}</h3>
-                    <div className="dim" style={{ fontSize: 12 }}>{w.addr} · {w.code}</div>
-                  </div>
-                  <div className="row" style={{ gap: 16 }}>
-                    <span className="badge badge-cyan mono">{qty} ชิ้น</span>
-                    <div style={{ width: 180 }}>
-                      <BarRow value={qty} total={p.stock || 1} tone="green"/>
-                    </div>
+          {wRow.map(w => (
+            <div className="card" key={w.wh}>
+              <div className="row-between" style={{ marginBottom: w.total > 0 ? 14 : 0 }}>
+                <div>
+                  <h3 className="card-title">{w.name}</h3>
+                  <div className="dim" style={{ fontSize: 12 }}>{w.wh}</div>
+                </div>
+                <div className="row" style={{ gap: 16 }}>
+                  <span className={`badge ${w.total > 0 ? 'badge-cyan' : 'badge-neutral'} mono`}>{w.total} ชิ้น</span>
+                  <div style={{ width: 200 }}>
+                    <BarRow value={w.total} total={p.stock || 1} tone={w.total === 0 ? "danger" : "green"}/>
                   </div>
                 </div>
               </div>
-            );
-          })}
+              {w.total > 0 && w.sizes.length > 0 && (
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  {w.sizes.map(s => (
+                    <div key={s.size} style={{ textAlign: 'center', padding: '6px 12px', borderRadius: 8, background: 'var(--surface-2)', minWidth: 52 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-mid)' }}>{s.size}</div>
+                      <div style={{ fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-mono)', color: s.qty === 0 ? 'var(--neon-danger)' : 'var(--text-main)' }}>{s.qty}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {w.total === 0 && <div className="dim" style={{ fontSize: 12 }}>ไม่มีสต๊อคที่คลังนี้</div>}
+            </div>
+          ))}
+          <div className="card" style={{ padding: 14, background: 'var(--surface)' }}>
+            <div className="row-between">
+              <span style={{ fontSize: 13, fontWeight: 600 }}>รวมทั้งหมด</span>
+              <span className="badge badge-green mono">{p.stock} ชิ้น</span>
+            </div>
+          </div>
         </div>
       )}
 

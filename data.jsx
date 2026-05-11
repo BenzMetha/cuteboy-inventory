@@ -12,20 +12,30 @@ function parseSizes(s) {
 }
 
 function parseProduct(r) {
+  const stockRAMA2 = Number(r.stockRAMA2) || 0;
+  const stockMYCL  = Number(r.stockMYCL)  || 0;
+  // total stock = sum of per-warehouse, or fall back to stock column
+  const totalStock = (r.stockRAMA2 !== undefined || r.stockMYCL !== undefined)
+    ? stockRAMA2 + stockMYCL
+    : (Number(r.stock) || 0);
   return {
     id: String(r.id),
     sku: String(r.sku),
     name: String(r.name),
     category: String(r.category),
-    stock: Number(r.stock) || 0,
+    stock: totalStock,
+    stockRAMA2,
+    stockMYCL,
     cost: Number(r.cost) || 0,
     price: Number(r.price) || 0,
+    comparePrice: Number(r.comparePrice) || 0,
     reorderPoint: Number(r.reorderPoint) || 0,
     sizes: parseSizes(r.sizes),
     color: String(r.colors || ''),
     brand: 'Cuteboy',
     barcode: r.barcode ? String(r.barcode) : '',
-    status: Number(r.stock) > 0 ? 'active' : 'out',
+    imageUrl: r.imageUrl ? String(r.imageUrl) : '',
+    status: totalStock > 0 ? 'active' : 'out',
     shopify: 'synced',
   };
 }
