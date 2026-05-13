@@ -4,30 +4,44 @@ const { WAREHOUSES, PRODUCTS, MOVEMENTS, SUPPLIERS, TIMESERIES, CATEGORIES } = w
 /* =========================================================
    DASHBOARD
    ========================================================= */
-function DashboardPage({ onNav, openScanner }) {
+function DashboardPage({ onNav }) {
   const toast = useToast();
-  const totalUnits = PRODUCTS.reduce((s, p) => s + p.stock, 0);
-  const totalSKUs = PRODUCTS.length;
-  const totalValue = PRODUCTS.reduce((s, p) => s + p.stock * p.cost, 0);
-  const lowStock = PRODUCTS.filter(p => p.stock < p.reorderPoint && p.stock > 0);
-  const outStock = PRODUCTS.filter(p => p.stock === 0);
 
-  // category breakdown
-  const catTotals = CATEGORIES.map(c => ({
-    label: c,
-    value: PRODUCTS.filter(p => p.category === c).reduce((s, p) => s + p.stock, 0),
-  }));
+  // --- KPI calculations ---
+  const totalUnits   = PRODUCTS.reduce((s, p) => s + p.stock, 0);
+  const activeSKUs   = PRODUCTS.filter(p => p.stock > 0).length;
+  const stockValue   = PRODUCTS.filter(p => p.stock > 0).reduce((s, p) => s + p.stock * p.cost, 0);
+
+  // Packing queue count (pending + packing)
+  const [packCount, setPackCount] = React.useState(() => {
+    const c = window.PackingStore?.counts() || { pending: 0, packing: 0 };
+    return c.pending + c.packing;
+  });
+  React.useEffect(() => {
+    if (!window.PackingStore) return;
+    const unsub = window.PackingStore.subscribe(c => setPackCount(c.pending + c.packing));
+    return unsub;
+  }, []);
+
+  // Top 5 categories by remaining stock
   const palette = ["var(--neon-1)", "var(--neon-2)", "#fbbf24", "var(--neon-danger)", "var(--neon-3)"];
-  const donutData = catTotals.map((d, i) => ({ ...d, color: palette[i] }));
+  const catTotals = CATEGORIES
+    .map(c => ({
+      label: c,
+      value: PRODUCTS.filter(p => p.category === c && p.stock > 0).reduce((s, p) => s + p.stock, 0),
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+  const maxCat = catTotals[0]?.value || 1;
 
   return (
     <>
       <PageHeader
         title="Dashboard"
-        subtitle="ภาพรวมสินค้าคงเหลือและความเคลื่อนไหวล่าสุด · ข้อมูลอัพเดต live ทุก 30 วินาที"
+        subtitle="ภาพรวมสินค้าคงเหลือ · ข้อมูล live จาก Google Sheets"
         actions={
           <>
-            <button className="btn btn-ghost" onClick={() => toast.success("Sync เสร็จเรียบร้อย", "ดึงข้อมูลจาก Shopify · 12 SKUs อัพเดต")}>
+            <button className="btn btn-ghost" onClick={() => toast.success("Sync เสร็จเรียบร้อย", "ดึงข้อมูลจาก Google Sheets")}>
               <I.link/> Sync ทันที
             </button>
             <button className="btn btn-primary" onClick={() => onNav("receive")}>
@@ -37,75 +51,40 @@ function DashboardPage({ onNav, openScanner }) {
         }
       />
 
+      {/* 5 KPI cards */}
       <div className="stat-grid">
-        <StatCard label="Total stock on hand" value={totalUnits} unit="units" accent="var(--neon-1)" ico={<I.box/>} delta={4.2} deltaDir="up"/>
-        <StatCard label="Active SKUs" value={totalSKUs} accent="var(--neon-2)" ico={<I.sparkle/>} delta={1.8} deltaDir="up"/>
         <StatCard
-          label="Stock value"
-          value={totalValue}
+          label="Total Stock on Hand"
+          value={totalUnits}
+          unit="units"
+          accent="var(--neon-1)"
+          ico={<I.box/>}
+        />
+        <StatCard
+          label="Active SKUs"
+          value={activeSKUs}
+          unit="SKUs"
+          accent="var(--neon-2)"
+          ico={<I.sparkle/>}
+        />
+        <StatCard
+          label="Stock Value"
+          value={stockValue}
           accent="#fbbf24"
           ico={<I.chart/>}
           format={(v) => "฿" + new Intl.NumberFormat("en-US").format(Math.round(v))}
-          delta={6.1}
-          deltaDir="up"
         />
-        <StatCard label="ต้องสั่งเพิ่ม · Reorder" value={lowStock.length + outStock.length} unit="SKUs" accent="var(--neon-danger)" ico={<I.warn/>} delta={2} deltaDir="down"/>
+        <StatCard
+          label="ใบงานรอแพ็ค"
+          value={packCount}
+          unit="ใบ"
+          accent="var(--neon-3)"
+          ico={<I.box/>}
+        />
       </div>
 
-      <div className="grid-12-8">
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <h3 className="card-title">Movement · 14 วันที่ผ่านมา</h3>
-              <p className="card-subtitle">รับเข้า (เขียว) vs จ่ายออก (ชมพู) · เส้นกลางคือค่าเฉลี่ยรวม</p>
-            </div>
-            <div className="row" style={{ gap: 14, fontSize: 12, color: 'var(--text-mid)' }}>
-              <span className="row" style={{ gap: 6 }}><span style={{ width: 8, height: 8, background: 'var(--neon-3)', borderRadius: 2 }}/>รับเข้า</span>
-              <span className="row" style={{ gap: 6 }}><span style={{ width: 8, height: 8, background: 'var(--neon-danger)', borderRadius: 2 }}/>จ่ายออก</span>
-            </div>
-          </div>
-          <MovementChart data={TIMESERIES}/>
-        </div>
-
-        <div className="stack">
-          <div className="card">
-            <div className="card-head">
-              <h3 className="card-title">สัดส่วนตามหมวด</h3>
-            </div>
-            <CategoryDonut data={donutData} size={150}/>
-          </div>
-          <div className="card" style={{ padding: 18 }}>
-            <div className="row-between" style={{ marginBottom: 10 }}>
-              <h3 className="card-title" style={{ fontSize: 14 }}>Integrations</h3>
-              <span className="badge badge-green"><span className="dot-mark"/>online</span>
-            </div>
-            <div className="stack" style={{ gap: 10 }}>
-              <div className="row-between">
-                <div className="row" style={{ gap: 10 }}>
-                  <ShopifyMark/>
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 13 }}>Shopify Storefront</div>
-                    <div className="dim" style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)' }}>ล่าสุด · 11:54</div>
-                  </div>
-                </div>
-                <span className="badge badge-green">synced</span>
-              </div>
-              <div className="row-between">
-                <div className="row" style={{ gap: 10 }}>
-                  <SheetsMark/>
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 13 }}>Google Sheet</div>
-                    <div className="dim" style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)' }}>auto · ทุก 15 นาที</div>
-                  </div>
-                </div>
-                <span className="badge badge-cyan">live</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid-12-8" style={{ marginTop: 20 }}>
+      {/* Top 5 categories + Recent movements */}
+      <div className="grid-12-8" style={{ marginTop: 4 }}>
         <div className="card">
           <div className="card-head">
             <div>
@@ -115,34 +94,36 @@ function DashboardPage({ onNav, openScanner }) {
             <button className="btn btn-sm btn-ghost" onClick={() => onNav("movement")}>ดูทั้งหมด <I.chevR/></button>
           </div>
           <div className="stack" style={{ gap: 4 }}>
-            {MOVEMENTS.slice(0, 6).map(m => (
+            {MOVEMENTS.slice(0, 8).map(m => (
               <MovementRow key={m.id} m={m}/>
             ))}
+            {MOVEMENTS.length === 0 && (
+              <div className="empty" style={{ padding: 24 }}>ยังไม่มีข้อมูล Movement</div>
+            )}
           </div>
         </div>
 
         <div className="card">
           <div className="card-head">
-            <div>
-              <h3 className="card-title">⚠ ต้องสั่งเติม</h3>
-              <p className="card-subtitle">สินค้าที่ต่ำกว่าจุดสั่งซื้อ</p>
-            </div>
-            <button className="btn btn-sm btn-ghost" onClick={() => onNav("stock")}>รายงาน <I.chevR/></button>
+            <h3 className="card-title">Top 5 หมวดสินค้า</h3>
+            <p className="card-subtitle" style={{ margin: 0, fontSize: 12 }}>สัดส่วนตามจำนวนที่เหลือ</p>
           </div>
-          <div className="stack" style={{ gap: 14 }}>
-            {[...outStock, ...lowStock].slice(0, 4).map(p => (
-              <div key={p.id}>
-                <div className="row" style={{ gap: 10, marginBottom: 6 }}>
-                  <ProductThumb product={p} size={36}/>
-                  <div className="flex-1" style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                    <div className="dim mono" style={{ fontSize: 11 }}>{p.sku}</div>
+          <div className="stack" style={{ gap: 14, marginTop: 8 }}>
+            {catTotals.map((c, i) => (
+              <div key={c.label}>
+                <div className="row-between" style={{ marginBottom: 6 }}>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: palette[i], display: 'inline-block', flexShrink: 0 }}/>
+                    <span style={{ fontSize: 13, fontWeight: 500 }}>{c.label}</span>
                   </div>
-                  <StockBadge stock={p.stock} reorderPoint={p.reorderPoint}/>
+                  <span className="mono" style={{ fontSize: 13, color: 'var(--text-mid)' }}>{fmtNum(c.value)} ชิ้น</span>
                 </div>
-                <BarRow label={null} value={p.stock} total={p.reorderPoint * 2} tone={p.stock === 0 ? "danger" : "warn"}/>
+                <div className="bar" style={{ height: 6 }}>
+                  <span style={{ width: Math.round((c.value / maxCat) * 100) + '%', background: palette[i] }}/>
+                </div>
               </div>
             ))}
+            {catTotals.length === 0 && <div className="dim" style={{ fontSize: 13 }}>ยังไม่มีข้อมูลสินค้า</div>}
           </div>
         </div>
       </div>
@@ -195,7 +176,7 @@ function ReceivePage() {
   const [items, setItems] = useState([]);
   const [supplier, setSupplier] = useState(SUPPLIERS[0].id);
   const [warehouse, setWarehouse] = useState(WAREHOUSES[0].id);
-  const [zone, setZone] = useState(WAREHOUSES[0].zones[0].id);
+  const [zone, setZone] = useState(WAREHOUSES[0]?.zones?.[0]?.id || '');
   const [poRef, setPoRef] = useState("PO-25005");
   const inputRef = useRef(null);
 
@@ -399,16 +380,18 @@ function ReceivePage() {
             </div>
             <div className="field">
               <label className="field-label">คลังปลายทาง · Warehouse</label>
-              <select className="select" value={warehouse} onChange={(e) => { setWarehouse(e.target.value); setZone(WAREHOUSES.find(w => w.id === e.target.value).zones[0].id); }}>
+              <select className="select" value={warehouse} onChange={(e) => { const wId = e.target.value; setWarehouse(wId); const wObj = WAREHOUSES.find(w => w.id === wId); setZone(wObj?.zones?.[0]?.id || ''); }}>
                 {WAREHOUSES.map(w => <option key={w.id} value={w.id}>{w.code} · {w.name}</option>)}
               </select>
             </div>
-            <div className="field">
-              <label className="field-label">Zone</label>
-              <select className="select" value={zone} onChange={(e) => setZone(e.target.value)}>
-                {currentWh.zones.map(z => <option key={z.id} value={z.id}>{z.code} · {z.type}</option>)}
-              </select>
-            </div>
+            {currentWh?.zones?.length > 0 && (
+              <div className="field">
+                <label className="field-label">Zone</label>
+                <select className="select" value={zone} onChange={(e) => setZone(e.target.value)}>
+                  {currentWh.zones.map(z => <option key={z.id} value={z.id}>{z.code} · {z.type}</option>)}
+                </select>
+              </div>
+            )}
             <div className="field">
               <label className="field-label">วันที่รับเข้า</label>
               <input className="input mono" defaultValue="2026-05-11" type="text"/>
@@ -440,16 +423,44 @@ function ReceivePage() {
 }
 
 /* =========================================================
-   ISSUE (จ่ายออก) — with drag & drop pick list
+   ISSUE (จ่ายออก) — warehouse selector + pick list
    ========================================================= */
+const EMPLOYEES = ["คุณพลอย", "คุณกานต์", "คุณแนน", "คุณฝ้าย", "คุณมิ้น", "คุณบิ๊ก"];
+const CHANNELS  = [
+  "Shopify", "Shopee", "Live", "Event", "To Mycloud",
+  "Influencer", "Giveaway", "เบิกพนักงาน", "ลูกค้าเปลี่ยน", "เคลมสินค้า",
+];
+
 function IssuePage() {
   const toast = useToast();
-  const [available, setAvailable] = useState(() => PRODUCTS.filter(p => p.stock > 0).slice(0, 10).map(p => ({ ...p })));
+
+  // Today's date as YYYY-MM-DD
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Warehouse selector — filters which stock column is shown
+  const [selectedWh, setSelectedWh] = useState(WAREHOUSES[0]?.id || '');
+
+  const getWhStock = (p) => {
+    const wh = WAREHOUSES.find(w => w.id === selectedWh);
+    if (!wh) return p.stock;
+    if (wh.code === 'RAMA2') return p.stockRAMA2 || 0;
+    if (wh.code === 'MYCL')  return p.stockMYCL  || 0;
+    return p.stock;
+  };
+
+  const [available, setAvailable] = useState(() =>
+    PRODUCTS.filter(p => p.stock > 0).map(p => ({ ...p }))
+  );
   const [picked, setPicked] = useState([]);
   const [draggingId, setDraggingId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
-  const [orderRef, setOrderRef] = useState("SO-25-9925");
-  const [destination, setDestination] = useState("shopify");
+
+  // Form fields
+  const [orderRef,    setOrderRef]    = useState("SO-" + todayStr.replace(/-/g, '').slice(2));
+  const [issueDate,   setIssueDate]   = useState(todayStr);
+  const [requestedBy, setRequestedBy] = useState(EMPLOYEES[0]);
+  const [channel,     setChannel]     = useState(CHANNELS[0]);
+  const [note,        setNote]        = useState("");
 
   const moveToPicked = (id) => {
     const p = available.find(x => x.id === id);
@@ -467,33 +478,30 @@ function IssuePage() {
 
   const handleDragStart = (id) => setDraggingId(id);
   const handleDragEnd = () => { setDraggingId(null); setDragOver(null); };
-
   const handleDrop = (side) => {
     if (!draggingId) return;
-    if (side === 'picked') {
-      if (available.find(x => x.id === draggingId)) moveToPicked(draggingId);
-    } else {
-      if (picked.find(x => x.id === draggingId)) moveToAvailable(draggingId);
-    }
-    setDraggingId(null);
-    setDragOver(null);
+    if (side === 'picked'    && available.find(x => x.id === draggingId)) moveToPicked(draggingId);
+    if (side === 'available' && picked.find(x => x.id === draggingId))    moveToAvailable(draggingId);
+    setDraggingId(null); setDragOver(null);
   };
 
-  const totalQty = picked.reduce((s, x) => s + x.pickQty, 0);
+  const totalQty   = picked.reduce((s, x) => s + x.pickQty, 0);
   const totalValue = picked.reduce((s, x) => s + x.pickQty * x.price, 0);
 
   const submit = () => {
-    if (!picked.length) { toast.warn("ยังไม่มีของให้จ่าย", "ลากสินค้ามาวางในช่อง 'รายการจ่ายออก'"); return; }
+    if (!picked.length) { toast.warn("ยังไม่มีของให้จ่าย", "เลือกสินค้าก่อนยืนยัน"); return; }
+    const wh = WAREHOUSES.find(w => w.id === selectedWh);
     window.PackingStore.add({
       ref: orderRef,
-      destination,
+      destination: channel,
+      requestedBy, note,
+      whCode: wh?.code || '',
       createdAt: new Date().toISOString(),
       items: picked.map(p => ({ id: p.id, name: p.name, sku: p.sku, category: p.category, price: p.price, pickQty: p.pickQty, packed: 0 })),
     });
-    toast.success("ส่งเข้าคิวแพ็ค 📦", `${orderRef} · ${picked.length} SKU · ${totalQty} ชิ้น · รอแพ็ค`);
+    toast.success("ส่งเข้าคิวแพ็ค 📦", `${orderRef} · ${picked.length} SKU · ${totalQty} ชิ้น`);
     setTimeout(() => toast.info("ไปที่หน้า 'แพ็คสินค้า'", "เพื่อยืนยันการแพ็คและตัดสต๊อค"), 900);
     setPicked([]);
-    // bump nav badge
     window.dispatchEvent(new CustomEvent('packing:changed'));
   };
 
@@ -501,16 +509,32 @@ function IssuePage() {
     <>
       <PageHeader
         title="จ่ายออกสินค้า · Issue"
-        subtitle="ลาก-วางสินค้าจากซ้าย ➜ ขวา · ระบบจะตัดสต๊อคและซิงค์อัตโนมัติ"
-        actions={
-          <>
-            <button className="btn btn-ghost"><I.scan/> สแกน Pick</button>
-            <button className="btn btn-primary" onClick={submit}><I.check/> ยืนยันจ่ายออก</button>
-          </>
-        }
+        subtitle="เลือกคลัง · เลือกสินค้า · ยืนยันการจ่ายออก"
+        actions={<>
+          <button className="btn btn-primary" onClick={submit}><I.check/> ยืนยันจ่ายออก</button>
+        </>}
       />
 
+      {/* Warehouse selector */}
+      <div className="card" style={{ padding: '12px 16px', marginBottom: 12 }}>
+        <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-mid)', whiteSpace: 'nowrap' }}>คลังต้นทาง:</span>
+          <div className="chips">
+            {WAREHOUSES.map(w => (
+              <button
+                key={w.id}
+                className={"chip " + (selectedWh === w.id ? "on" : "")}
+                onClick={() => setSelectedWh(w.id)}
+              >
+                {w.code} · {w.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="grid-12-8">
+        {/* Pick list */}
         <div className="pick-pane">
           <div className="pick-col">
             <div className="pick-col-head">
@@ -523,24 +547,27 @@ function IssuePage() {
               onDragLeave={() => setDragOver(null)}
               onDrop={() => handleDrop('available')}
             >
-              {available.map(p => (
-                <div key={p.id}
-                     className={"pick-item " + (draggingId === p.id ? "dragging" : "")}
-                     draggable
-                     onDragStart={() => handleDragStart(p.id)}
-                     onDragEnd={handleDragEnd}
-                     onDoubleClick={() => moveToPicked(p.id)}
-                >
-                  <span className="dim"><I.drag/></span>
-                  <ProductThumb product={p} size={36}/>
-                  <div className="pi-info">
-                    <div className="pi-name">{p.name}</div>
-                    <div className="pi-meta">{p.sku} · stock {p.stock}</div>
+              {available.map(p => {
+                const whStock = getWhStock(p);
+                return (
+                  <div key={p.id}
+                       className={"pick-item " + (draggingId === p.id ? "dragging" : "")}
+                       draggable
+                       onDragStart={() => handleDragStart(p.id)}
+                       onDragEnd={handleDragEnd}
+                       onDoubleClick={() => moveToPicked(p.id)}
+                  >
+                    <span className="dim"><I.drag/></span>
+                    <ProductThumb product={p} size={36}/>
+                    <div className="pi-info">
+                      <div className="pi-name">{p.name}</div>
+                      <div className="pi-meta">{p.sku} · คงเหลือ {fmtNum(whStock)} ชิ้น</div>
+                    </div>
+                    <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={() => moveToPicked(p.id)}><I.chevR/></button>
                   </div>
-                  <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={() => moveToPicked(p.id)}><I.chevR/></button>
-                </div>
-              ))}
-              {available.length === 0 && <div className="drop-hint">ไม่มีสินค้าเหลือในรายการนี้</div>}
+                );
+              })}
+              {available.length === 0 && <div className="drop-hint">ไม่มีสินค้าเหลือ</div>}
             </div>
           </div>
 
@@ -579,40 +606,33 @@ function IssuePage() {
           </div>
         </div>
 
+        {/* Form panel */}
         <div className="card" style={{ position: 'sticky', top: 84, alignSelf: 'start' }}>
           <h3 className="card-title" style={{ marginBottom: 16 }}>ข้อมูลใบจ่ายออก</h3>
           <div className="stack" style={{ gap: 14 }}>
             <div className="field">
-              <label className="field-label">เลขที่ใบ (Sales Order)</label>
+              <label className="field-label">วันที่จ่ายออก</label>
+              <input className="input mono" type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)}/>
+            </div>
+            <div className="field">
+              <label className="field-label">เลขที่ใบ (Order Ref)</label>
               <input className="input mono" value={orderRef} onChange={(e) => setOrderRef(e.target.value)}/>
             </div>
             <div className="field">
-              <label className="field-label">ปลายทาง / ช่องทาง</label>
-              <div className="seg" style={{ width: '100%' }}>
-                {[
-                  { v: "shopify", l: "Shopify" },
-                  { v: "popup",   l: "Pop-up" },
-                  { v: "wholesale", l: "Wholesale" },
-                ].map(o => (
-                  <button key={o.v} className={destination === o.v ? "on" : ""} onClick={() => setDestination(o.v)} style={{ flex: 1 }}>
-                    {o.l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="field">
-              <label className="field-label">คลังต้นทาง</label>
-              <select className="select">
-                {WAREHOUSES.map(w => <option key={w.id}>{w.code} · {w.name}</option>)}
+              <label className="field-label">ผู้ขอเบิก</label>
+              <select className="select" value={requestedBy} onChange={(e) => setRequestedBy(e.target.value)}>
+                {EMPLOYEES.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
             </div>
             <div className="field">
-              <label className="field-label">ผู้รับ</label>
-              <input className="input" defaultValue="คุณกานต์ (จัดส่ง Kerry)"/>
+              <label className="field-label">ช่องทาง / วัตถุประสงค์</label>
+              <select className="select" value={channel} onChange={(e) => setChannel(e.target.value)}>
+                {CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
             <div className="field">
               <label className="field-label">หมายเหตุ</label>
-              <textarea className="textarea" placeholder="ใส่ข้อมูลเพิ่มเติม…"/>
+              <textarea className="textarea" placeholder="ใส่ข้อมูลเพิ่มเติม…" value={note} onChange={(e) => setNote(e.target.value)}/>
             </div>
 
             <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 14 }}>
@@ -629,6 +649,10 @@ function IssuePage() {
                 <b className="mono text-neon" style={{ fontSize: 17 }}>{fmtTHB(totalValue)}</b>
               </div>
             </div>
+
+            <button className="btn btn-primary" style={{ width: '100%' }} onClick={submit}>
+              <I.check/> ยืนยันจ่ายออก
+            </button>
           </div>
         </div>
       </div>
@@ -641,11 +665,23 @@ function IssuePage() {
    ========================================================= */
 function ProductsPage({ onSelectProduct }) {
   const [search, setSearch] = useState("");
-  const [cat, setCat] = useState("All");
-  const filtered = PRODUCTS.filter(p =>
-    (cat === "All" || p.category === cat) &&
-    (search === "" || (p.name + " " + p.sku).toLowerCase().includes(search.toLowerCase()))
-  );
+  const [cat,    setCat]    = useState("All");
+  const [stockFilter, setStockFilter] = useState("all"); // all | instock | soldout
+  const [page,   setPage]   = useState(1);
+  const PER_PAGE = 25;
+
+  const filtered = PRODUCTS.filter(p => {
+    if (cat !== "All" && p.category !== cat) return false;
+    if (stockFilter === "instock"  && p.stock === 0) return false;
+    if (stockFilter === "soldout"  && p.stock > 0)  return false;
+    if (search && !(p.name + " " + p.sku).toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  // Reset to page 1 when filters change
+  React.useEffect(() => { setPage(1); }, [search, cat, stockFilter]);
+
+  const pageItems = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   return (
     <>
@@ -660,10 +696,17 @@ function ProductsPage({ onSelectProduct }) {
 
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-          <div className="search" style={{ width: 320 }}>
+          <div className="search" style={{ width: 280 }}>
             <span className="search-ico"><I.search/></span>
             <input placeholder="ค้นหา SKU หรือชื่อสินค้า…" value={search} onChange={(e) => setSearch(e.target.value)}/>
           </div>
+          {/* Stock status toggle */}
+          <div className="seg">
+            <button className={stockFilter === "all"     ? "on" : ""} onClick={() => setStockFilter("all")}>ทั้งหมด</button>
+            <button className={stockFilter === "instock" ? "on" : ""} onClick={() => setStockFilter("instock")}>มีสต๊อค</button>
+            <button className={stockFilter === "soldout" ? "on" : ""} onClick={() => setStockFilter("soldout")}>หมดแล้ว</button>
+          </div>
+          {/* Category chips */}
           <div className="chips">
             {["All", ...CATEGORIES].map(c => (
               <button key={c} className={"chip " + (cat === c ? "on" : "")} onClick={() => setCat(c)}>{c}</button>
@@ -689,7 +732,7 @@ function ProductsPage({ onSelectProduct }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(p => (
+              {pageItems.map(p => (
                 <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => onSelectProduct(p.id)}>
                   <td>
                     <div className="cell-product">
@@ -730,8 +773,14 @@ function ProductsPage({ onSelectProduct }) {
                   <td><button className="icon-btn" style={{ width: 32, height: 32 }}><I.chevR/></button></td>
                 </tr>
               ))}
+              {pageItems.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--text-mid)' }}>ไม่พบสินค้า</td></tr>
+              )}
             </tbody>
           </table>
+        </div>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-soft)' }}>
+          <Paginator total={filtered.length} page={page} perPage={PER_PAGE} onChange={setPage}/>
         </div>
       </div>
     </>
@@ -983,37 +1032,66 @@ function ProductDetailPage({ productId, onBack }) {
 }
 
 /* =========================================================
-   LOCATIONS
+   LOCATIONS — simplified view
    ========================================================= */
 function LocationsPage() {
-  const toast = useToast();
-  const [selected, setSelected] = useState(null);
+  // Per-warehouse stock totals and active SKU counts from real data
+  const whStats = WAREHOUSES.map(w => {
+    let totalStock = 0;
+    let activeSKUs = 0;
+    if (w.code === 'RAMA2') {
+      totalStock = PRODUCTS.reduce((s, p) => s + (p.stockRAMA2 || 0), 0);
+      activeSKUs = PRODUCTS.filter(p => (p.stockRAMA2 || 0) > 0).length;
+    } else if (w.code === 'MYCL') {
+      totalStock = PRODUCTS.reduce((s, p) => s + (p.stockMYCL || 0), 0);
+      activeSKUs = PRODUCTS.filter(p => (p.stockMYCL || 0) > 0).length;
+    } else {
+      // fallback: split evenly
+      const share = WAREHOUSES.length > 0 ? 1 / WAREHOUSES.length : 1;
+      totalStock = Math.round(PRODUCTS.reduce((s, p) => s + p.stock, 0) * share);
+      activeSKUs = PRODUCTS.filter(p => p.stock > 0).length;
+    }
+    return { ...w, totalStock, activeSKUs };
+  });
+
+  const grandTotal = whStats.reduce((s, w) => s + w.totalStock, 0);
+  const totalActiveSKUs = PRODUCTS.filter(p => p.stock > 0).length;
 
   return (
     <>
       <PageHeader
-        title="Locations"
-        subtitle="Multi-warehouse · ระบบ Track สต๊อคแต่ละ Zone อัตโนมัติ"
+        title="Locations · คลังสินค้า"
+        subtitle={`${WAREHOUSES.length} คลัง · สต๊อครวม ${fmtNum(grandTotal)} ชิ้น`}
         actions={<>
-          <button className="btn btn-ghost"><I.plus/> เพิ่ม Zone</button>
           <button className="btn btn-primary"><I.plus/> เพิ่มคลัง</button>
         </>}
       />
 
+      {/* Summary cards */}
       <div className="stat-grid">
-        <StatCard label="คลังทั้งหมด" value={WAREHOUSES.length} unit="warehouses" accent="var(--neon-1)" ico={<I.map/>}/>
-        <StatCard label="Zones ทั้งหมด" value={WAREHOUSES.reduce((s, w) => s + w.zones.length, 0)} accent="var(--neon-2)" ico={<I.box/>}/>
-        <StatCard label="Capacity รวม" value={WAREHOUSES.reduce((s, w) => s + w.capacity, 0)} unit="ชิ้น" accent="#fbbf24"/>
-        <StatCard label="อัตราการใช้พื้นที่" value={Math.round(
-          WAREHOUSES.reduce((s, w) => s + w.zones.reduce((a, z) => a + z.used, 0), 0) /
-          WAREHOUSES.reduce((s, w) => s + w.capacity, 0) * 100
-        )} unit="%" accent="var(--neon-3)" deltaDir="up" delta={3.4}/>
+        <StatCard label="คลังทั้งหมด"    value={WAREHOUSES.length} unit="คลัง"  accent="var(--neon-1)" ico={<I.map/>}/>
+        <StatCard label="สต๊อครวมทุกคลัง" value={grandTotal}       unit="ชิ้น"  accent="var(--neon-2)" ico={<I.box/>}/>
+        <StatCard label="Active SKUs"     value={totalActiveSKUs}  unit="SKUs"  accent="#fbbf24"        ico={<I.sparkle/>}/>
       </div>
 
+      {/* One card per warehouse */}
       <div className="stack">
-        {WAREHOUSES.map(w => {
-          const used = w.zones.reduce((s, z) => s + z.used, 0);
-          const cap = w.capacity;
+        {whStats.map(w => {
+          const pct = grandTotal > 0 ? Math.round((w.totalStock / grandTotal) * 100) : 0;
+          // Top 5 products in this warehouse
+          const topProducts = PRODUCTS
+            .filter(p => {
+              if (w.code === 'RAMA2') return (p.stockRAMA2 || 0) > 0;
+              if (w.code === 'MYCL')  return (p.stockMYCL  || 0) > 0;
+              return p.stock > 0;
+            })
+            .sort((a, b) => {
+              const sa = w.code === 'RAMA2' ? (a.stockRAMA2 || 0) : w.code === 'MYCL' ? (a.stockMYCL || 0) : a.stock;
+              const sb = w.code === 'RAMA2' ? (b.stockRAMA2 || 0) : w.code === 'MYCL' ? (b.stockMYCL || 0) : b.stock;
+              return sb - sa;
+            })
+            .slice(0, 5);
+
           return (
             <div className="warehouse-card" key={w.id}>
               <div className="warehouse-head">
@@ -1022,95 +1100,51 @@ function LocationsPage() {
                     <span className="badge badge-cyan mono" style={{ fontSize: 12 }}>{w.code}</span>
                     {w.name}
                   </h3>
-                  <div className="warehouse-addr">{w.addr}</div>
-                  <div className="warehouse-meta">
+                  <div className="warehouse-addr">{w.addr || ''}</div>
+                  <div className="warehouse-meta" style={{ marginTop: 10 }}>
                     <div className="wm-stat">
-                      <div className="wm-stat-lbl">Zones</div>
-                      <div className="wm-stat-val">{w.zones.length}</div>
+                      <div className="wm-stat-lbl">สต๊อครวม</div>
+                      <div className="wm-stat-val">{fmtNum(w.totalStock)}</div>
                     </div>
                     <div className="wm-stat">
-                      <div className="wm-stat-lbl">Used</div>
-                      <div className="wm-stat-val">{fmtNum(used)}</div>
+                      <div className="wm-stat-lbl">Active SKUs</div>
+                      <div className="wm-stat-val">{w.activeSKUs}</div>
                     </div>
                     <div className="wm-stat">
-                      <div className="wm-stat-lbl">Capacity</div>
-                      <div className="wm-stat-val">{fmtNum(cap)}</div>
-                    </div>
-                    <div className="wm-stat">
-                      <div className="wm-stat-lbl">Utilization</div>
-                      <div className="wm-stat-val text-neon">{Math.round(used/cap*100)}%</div>
+                      <div className="wm-stat-lbl">สัดส่วน</div>
+                      <div className="wm-stat-val text-neon">{pct}%</div>
                     </div>
                   </div>
                 </div>
                 <div style={{ width: 220 }}>
-                  <BarRow value={used} total={cap}/>
+                  <BarRow value={w.totalStock} total={grandTotal || 1}/>
                 </div>
               </div>
 
-              <div className="zone-grid">
-                {w.zones.map(z => {
-                  const pct = Math.round((z.used / z.capacity) * 100);
-                  let tone = "green";
-                  if (pct > 90) tone = "danger";
-                  else if (pct > 75) tone = "warn";
-                  return (
-                    <div className="zone-card" key={z.id} onClick={() => { setSelected({ w, z }); }}>
-                      <div className="zone-head">
-                        <span className="zone-code">{z.code}</span>
-                        <span className="zone-type">{z.type}</span>
-                      </div>
-                      <div className="zone-body">
-                        <div className="zone-fill-row">
-                          <b>{fmtNum(z.used)} <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>/ {fmtNum(z.capacity)}</span></b>
-                          <span>{pct}%</span>
+              {topProducts.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>Top สินค้าในคลังนี้</div>
+                  <div className="stack" style={{ gap: 6 }}>
+                    {topProducts.map(p => {
+                      const qty = w.code === 'RAMA2' ? (p.stockRAMA2 || 0) : w.code === 'MYCL' ? (p.stockMYCL || 0) : p.stock;
+                      return (
+                        <div key={p.id} className="pick-item" style={{ cursor: 'default' }}>
+                          <ProductThumb product={p} size={32}/>
+                          <div className="pi-info">
+                            <div className="pi-name">{p.name}</div>
+                            <div className="pi-meta">{p.sku}</div>
+                          </div>
+                          <span className="badge badge-neutral mono">{fmtNum(qty)} ชิ้น</span>
                         </div>
-                        <div className={"bar " + tone}><span style={{ width: pct + '%' }}/></div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
-
-      <Modal open={!!selected} onClose={() => setSelected(null)} title={selected ? `${selected.w.code} · Zone ${selected.z.code}` : ""}>
-        {selected && (
-          <div className="stack" style={{ gap: 14 }}>
-            <div className="dim" style={{ fontSize: 13 }}>{selected.w.name} · {selected.z.type}</div>
-            <div className="row" style={{ gap: 12 }}>
-              <div className="card" style={{ flex: 1, padding: 14 }}>
-                <div className="stat-label">Used</div>
-                <div className="stat-value" style={{ fontSize: 22 }}>{fmtNum(selected.z.used)}</div>
-              </div>
-              <div className="card" style={{ flex: 1, padding: 14 }}>
-                <div className="stat-label">Capacity</div>
-                <div className="stat-value" style={{ fontSize: 22 }}>{fmtNum(selected.z.capacity)}</div>
-              </div>
-              <div className="card" style={{ flex: 1, padding: 14 }}>
-                <div className="stat-label">Fill rate</div>
-                <div className="stat-value text-neon" style={{ fontSize: 22 }}>{Math.round(selected.z.used/selected.z.capacity*100)}%</div>
-              </div>
-            </div>
-            <div>
-              <div className="stat-label">SKUs in zone</div>
-              <div className="stack" style={{ gap: 6, marginTop: 8 }}>
-                {PRODUCTS.filter(p => p.category === selected.z.type || selected.z.type === "Showroom" || selected.z.type === "Backroom").slice(0, 4).map(p => (
-                  <div key={p.id} className="pick-item">
-                    <ProductThumb product={p} size={32}/>
-                    <div className="pi-info">
-                      <div className="pi-name">{p.name}</div>
-                      <div className="pi-meta">{p.sku}</div>
-                    </div>
-                    <span className="badge badge-neutral mono">{Math.floor(p.stock * 0.3)} ชิ้น</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
     </>
   );
 }
@@ -1119,9 +1153,11 @@ function LocationsPage() {
    STOCK REPORT
    ========================================================= */
 function StockReportPage() {
-  const [cat, setCat] = useState("All");
+  const [cat,    setCat]    = useState("All");
   const [status, setStatus] = useState("All");
-  const [wh, setWh] = useState("All");
+  const [wh,     setWh]     = useState("All");
+  const [page,   setPage]   = useState(1);
+  const PER_PAGE = 30;
 
   const filtered = PRODUCTS.filter(p => {
     if (cat !== "All" && p.category !== cat) return false;
@@ -1131,6 +1167,9 @@ function StockReportPage() {
     return true;
   });
 
+  React.useEffect(() => { setPage(1); }, [cat, status, wh]);
+
+  const pageItems  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   const totalValue = filtered.reduce((s, p) => s + p.stock * p.cost, 0);
 
   return (
@@ -1187,9 +1226,8 @@ function StockReportPage() {
               <tr>
                 <th>สินค้า</th>
                 <th>หมวด</th>
-                <th className="num">BKK</th>
-                <th className="num">CNX</th>
-                <th className="num">ST01</th>
+                <th className="num">RAMA2</th>
+                <th className="num">MYCL</th>
                 <th className="num">รวม</th>
                 <th className="num">มูลค่า</th>
                 <th>สถานะ</th>
@@ -1198,14 +1236,12 @@ function StockReportPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(p => {
-                const bkk = Math.round(p.stock * 0.6);
-                const cnx = Math.round(p.stock * 0.28);
-                const st = p.stock - bkk - cnx;
+              {pageItems.map(p => {
+                const rama2 = p.stockRAMA2 || 0;
+                const mycl  = p.stockMYCL  || 0;
                 const target = p.reorderPoint * 3;
-                const pct = Math.min(100, Math.round((p.stock / target) * 100));
+                const pct = Math.min(100, Math.round((p.stock / (target || 1)) * 100));
                 let tone = "green";
-                if (pct > 90) tone = "";
                 if (p.stock < p.reorderPoint) tone = "warn";
                 if (p.stock === 0) tone = "danger";
                 return (
@@ -1220,9 +1256,8 @@ function StockReportPage() {
                       </div>
                     </td>
                     <td><span className="badge badge-neutral">{p.category}</span></td>
-                    <td className="num">{fmtNum(bkk)}</td>
-                    <td className="num">{fmtNum(cnx)}</td>
-                    <td className="num">{fmtNum(st)}</td>
+                    <td className="num">{fmtNum(rama2)}</td>
+                    <td className="num">{fmtNum(mycl)}</td>
                     <td className="num"><b>{fmtNum(p.stock)}</b></td>
                     <td className="num dim">{fmtTHB(p.stock * p.cost)}</td>
                     <td><StockBadge stock={p.stock} reorderPoint={p.reorderPoint}/></td>
@@ -1233,8 +1268,14 @@ function StockReportPage() {
                   </tr>
                 );
               })}
+              {pageItems.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--text-mid)' }}>ไม่พบข้อมูล</td></tr>
+              )}
             </tbody>
           </table>
+        </div>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-soft)' }}>
+          <Paginator total={filtered.length} page={page} perPage={PER_PAGE} onChange={setPage}/>
         </div>
       </div>
     </>
@@ -1245,10 +1286,12 @@ function StockReportPage() {
    MOVEMENT REPORT
    ========================================================= */
 function MovementReportPage() {
-  const [type, setType] = useState("All");
-  const [range, setRange] = useState("7d");
+  const [type,      setType]      = useState("All");
+  const [range,     setRange]     = useState("7d");
   const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [endDate,   setEndDate]   = useState("");
+  const [page,      setPage]      = useState(1);
+  const PER_PAGE = 30;
 
   const getDateRangeMovements = () => {
     if (!startDate || !endDate) return MOVEMENTS;
@@ -1263,6 +1306,9 @@ function MovementReportPage() {
 
   const dateFilteredMovements = getDateRangeMovements();
   const filtered = dateFilteredMovements.filter(m => type === "All" || m.type === type);
+
+  React.useEffect(() => { setPage(1); }, [type, startDate, endDate]);
+  const pageItems = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   const stats = {
     IN: dateFilteredMovements.filter(m => m.type === 'IN').reduce((s, m) => s + m.qty, 0),
@@ -1336,13 +1382,16 @@ function MovementReportPage() {
           </div>
         </div>
         <div className="stack" style={{ gap: 4 }}>
-          {filtered.length > 0 ? (
-            filtered.map(m => <MovementRow key={m.id} m={m}/>)
+          {pageItems.length > 0 ? (
+            pageItems.map(m => <MovementRow key={m.id} m={m}/>)
           ) : (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-mid)' }}>
               ไม่มีข้อมูล Movement ในช่วงวันที่ที่เลือก
             </div>
           )}
+        </div>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-soft)' }}>
+          <Paginator total={filtered.length} page={page} perPage={PER_PAGE} onChange={setPage}/>
         </div>
       </div>
     </>

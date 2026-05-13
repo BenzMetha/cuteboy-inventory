@@ -28,6 +28,8 @@ const I = {
   link: (p) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>,
   sparkle: (p) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="m12 3 2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7z"/></svg>,
   flag: (p) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M4 22V4"/><path d="M4 4h12l-2 4 2 4H4"/></svg>,
+  sun:  (p) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>,
+  moon: (p) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
 };
 
 /* ============ Toast system ============ */
@@ -81,7 +83,6 @@ const NAV = [
     { id: "receive", label: "รับเข้า · Receive", ico: <I.arrowDown/> },
     { id: "issue",   label: "จ่ายออก · Issue",  ico: <I.arrowUp/> },
     { id: "packing", label: "แพ็คสินค้า · Packing", ico: <I.box/>, dynBadge: "packing" },
-    { id: "transfer", label: "โอน · Transfer", ico: <I.tx/>, badge: "3" },
   ]},
   { group: "ข้อมูลหลัก / Master", items: [
     { id: "products",  label: "สินค้า · Products", ico: <I.box/> },
@@ -149,56 +150,137 @@ function Sidebar({ active, onNav, collapsed, setCollapsed }) {
   );
 }
 
-/* ============ Topbar ============ */
+/* ============ Topbar with functional search + theme toggle ============ */
 function Topbar({ crumbs, onNav, onShowScanner }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem('cb-theme') || 'dark');
+  const inputRef = useRef(null);
+
+  // apply theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('cb-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+
+  const doSearch = (val) => {
+    setQ(val);
+    if (!val.trim()) { setResults([]); setOpen(false); return; }
+    const v = val.toLowerCase();
+    const { PRODUCTS, MOVEMENTS } = window.INV_DATA;
+    const prods = PRODUCTS.filter(p =>
+      p.name.toLowerCase().includes(v) || p.sku.toLowerCase().includes(v) || (p.barcode||'').includes(v)
+    ).slice(0, 5).map(p => ({ kind: 'product', id: p.id, label: p.name, sub: p.sku, stock: p.stock, nav: 'products' }));
+    const movs = MOVEMENTS.filter(m =>
+      (m.ref||'').toLowerCase().includes(v) || (m.sku||'').toLowerCase().includes(v)
+    ).slice(0, 3).map(m => ({ kind: 'movement', id: m.id, label: m.ref, sub: `${m.type} · ${m.sku} · ${m.qty > 0 ? '+' : ''}${m.qty}`, nav: 'movement' }));
+    setResults([...prods, ...movs]);
+    setOpen(true);
+  };
+
+  const pick = (r) => {
+    setQ(''); setResults([]); setOpen(false);
+    onNav(r.nav);
+    // store selected product for highlight
+    if (r.kind === 'product') window._searchProduct = r.id;
+  };
+
+  useEffect(() => {
+    const close = (e) => { if (!e.target.closest('.topbar-search-wrap')) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
   return (
     <div className="topbar">
       <div className="breadcrumb">
         {crumbs.map((c, i) => (
           <React.Fragment key={i}>
             {i > 0 && <span className="crumb-sep"><I.chevR/></span>}
-            {i < crumbs.length - 1 ? (
-              <a onClick={() => c.to && onNav(c.to)}>{c.label}</a>
-            ) : (
-              <span className="crumb-current">{c.label}</span>
-            )}
+            {i < crumbs.length - 1
+              ? <a onClick={() => c.to && onNav(c.to)}>{c.label}</a>
+              : <span className="crumb-current">{c.label}</span>}
           </React.Fragment>
         ))}
       </div>
-      <div className="search">
-        <span className="search-ico"><I.search/></span>
-        <input placeholder="ค้นหา SKU, สินค้า, ใบรับ-จ่าย…" />
-        <span className="search-kbd">⌘ K</span>
+      <div className="topbar-search-wrap" style={{ position: 'relative', flex: 1, maxWidth: 380 }}>
+        <div className="search">
+          <span className="search-ico"><I.search/></span>
+          <input
+            ref={inputRef}
+            placeholder="ค้นหา SKU, ชื่อสินค้า, เลขอ้างอิง…"
+            value={q}
+            onChange={e => doSearch(e.target.value)}
+            onFocus={() => q && setOpen(true)}
+          />
+          {q && <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mid)', padding: '0 4px' }} onClick={() => { setQ(''); setResults([]); setOpen(false); }}>✕</button>}
+        </div>
+        {open && results.length > 0 && (
+          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, zIndex: 999, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+            {results.map(r => (
+              <div key={r.id} onClick={() => pick(r)} style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border-soft)', display: 'flex', gap: 10, alignItems: 'center' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
+                onMouseLeave={e => e.currentTarget.style.background = ''}>
+                <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: r.kind === 'product' ? 'color-mix(in oklab, var(--neon-1) 15%, var(--surface))' : 'color-mix(in oklab, var(--neon-2) 15%, var(--surface))', color: r.kind === 'product' ? 'var(--neon-1)' : 'var(--neon-2)' }}>{r.kind === 'product' ? 'สินค้า' : 'Movement'}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-mid)' }}>{r.sub}{r.stock != null ? ` · stock ${r.stock}` : ''}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {open && results.length === 0 && q && (
+          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, zIndex: 999, padding: '12px 14px', color: 'var(--text-mid)', fontSize: 13 }}>
+            ไม่พบผลลัพธ์สำหรับ "{q}"
+          </div>
+        )}
       </div>
       <div className="topbar-actions">
+        <button className="icon-btn" onClick={toggleTheme} title="เปลี่ยน theme">
+          {theme === 'dark' ? <I.sun/> : <I.moon/>}
+        </button>
         <button className="icon-btn" onClick={onShowScanner} title="Quick scan"><I.scan/></button>
-        <button className="icon-btn" title="Notifications"><I.bell/><span className="dot"/></button>
       </div>
     </div>
   );
 }
 
-/* ============ AnimatedNumber ============ */
-function AnimatedNumber({ value, format = (v) => Math.round(v).toString(), duration = 900 }) {
-  const [v, setV] = useState(0);
-  const ref = useRef({ start: 0, from: 0, to: value, raf: 0 });
-  useEffect(() => {
-    cancelAnimationFrame(ref.current.raf);
-    ref.current.from = v;
-    ref.current.to = value;
-    ref.current.start = performance.now();
-    const tick = (t) => {
-      const elapsed = t - ref.current.start;
-      const k = Math.min(1, elapsed / duration);
-      const eased = 1 - Math.pow(1 - k, 3);
-      const nv = ref.current.from + (ref.current.to - ref.current.from) * eased;
-      setV(nv);
-      if (k < 1) ref.current.raf = requestAnimationFrame(tick);
-    };
-    ref.current.raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(ref.current.raf);
-  }, [value, duration]);
-  return <>{format(v)}</>;
+/* ============ AnimatedNumber (lightweight) ============ */
+function AnimatedNumber({ value, format = (v) => Math.round(v).toString() }) {
+  // No animation for performance — just render the value
+  return <>{format(value)}</>;
+}
+
+/* ============ Paginator ============ */
+function Paginator({ total, page, perPage, onChange }) {
+  const pages = Math.ceil(total / perPage);
+  if (pages <= 1) return null;
+  const from = (page - 1) * perPage + 1;
+  const to = Math.min(page * perPage, total);
+  // show up to 7 page buttons
+  const range = [];
+  const delta = 2;
+  for (let i = 1; i <= pages; i++) {
+    if (i === 1 || i === pages || (i >= page - delta && i <= page + delta)) range.push(i);
+    else if (range[range.length - 1] !== '...') range.push('...');
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '1px solid var(--border-soft)', flexWrap: 'wrap', gap: 8 }}>
+      <span style={{ fontSize: 12, color: 'var(--text-mid)' }}>{from}–{to} จาก {total} รายการ</span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>
+        {range.map((r, i) => r === '...'
+          ? <span key={i} style={{ padding: '4px 6px', color: 'var(--text-mid)', fontSize: 12 }}>…</span>
+          : <button key={r} className={"btn " + (r === page ? "btn-primary" : "btn-ghost")} style={{ padding: '4px 10px', fontSize: 12, minWidth: 32 }} onClick={() => onChange(r)}>{r}</button>
+        )}
+        <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} disabled={page === pages} onClick={() => onChange(page + 1)}>›</button>
+      </div>
+    </div>
+  );
 }
 
 /* ============ StatCard ============ */
@@ -457,7 +539,7 @@ function Modal({ open, onClose, title, children, width = 560 }) {
 }
 
 Object.assign(window, {
-  I, ToastProvider, useToast, Sidebar, Topbar, AnimatedNumber, StatCard,
+  I, ToastProvider, useToast, Sidebar, Topbar, AnimatedNumber, StatCard, Paginator,
   MovementChart, CategoryDonut, BarRow, PageHeader, ProductThumb, StockBadge,
   Scanner, Modal,
 });
